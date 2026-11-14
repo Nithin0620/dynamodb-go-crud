@@ -6,6 +6,14 @@ import (
 	"time"
 	"github.com/go-chi/chi"
 	"github.com/google/uuid"
+
+	"github.com/Nithin0620/dynamoDB-GO-CRUD/internal/adapter"
+	"github.com/Nithin0620/dynamoDB-GO-CRUD/controllers/product"
+	EntityProduct "github.com/Nithin0620/dynamoDB-GO-CRUD/internal/entities/product"
+	"github.com/Nithin0620/dynamoDB-GO-CRUD/internal/handlers"
+	Rules "github.com/Nithin0620/dynamoDB-GO-CRUD/internal/rules"
+	RulesProduct "github.com/Nithin0620/dynamoDB-GO-CRUD/internal/rules/product"
+	HttpStatus "github.com/Nithin0620/dynamoDB-GO-CRUD/utils/http"
 )
 
 type Handler struct {
@@ -154,10 +162,29 @@ func (h *Handler) Options(w http.ResponseWriter, r *http.Request) {
 	HttpStatus.StatusNoContent(w,r)
 }
 
-func (h *Handler) getBodyAndValidate(r *http.Request)() {
-	
+func (h *Handler) getBodyAndValidate(r *http.Request,ID uuid.UUID)(*EntityProduct.Product,error) {
+	productBody := &EntityProduct.Product{}
+	body,err	:=	h.Rules.ConvertIoReaderToStruct(r.Body,productBody)
+	if err != nil {
+		return &EntityProduct.Product{},errors.New("Body is required and must be a valid JSON")
+	}
+	productParsed,err := EntityProduct.InterfaceToModel(body)
+	if err != nil {
+		return &EntityProduct.Product{},errors.New("Error while parsing the product")
+	}
+	setDefaultValues(productParsed,ID)
+	return productParsed,h.Rule.Validate(productParsed)
+
 }
 
-func setDefaultValues(product *product.Product) {
+func setDefaultValues(product *EntityProduct.Product, ID uuid.UUID) {
+
+	product.UpdatedAt = time.Now()
+	if ID == uuid.Nil {
+		product.ID = uuid.New()
+		product.CreatedAt = time.Now()
+	} else {
+		product.ID = ID
+	}
 
 }
