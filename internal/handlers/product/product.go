@@ -1,36 +1,36 @@
 package product
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-
-	product "github.com/Nithin0620/dynamodb-go-crud/internal/controllers"
+	prodCtrl "github.com/Nithin0620/dynamodb-go-crud/internal/controllers"
 	EntityProduct "github.com/Nithin0620/dynamodb-go-crud/internal/entities/product"
-	"github.com/Nithin0620/dynamodb-go-crud/internal/handlers"
 	"github.com/Nithin0620/dynamodb-go-crud/internal/repository/adapter"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/routes/middlewares"
 	Rules "github.com/Nithin0620/dynamodb-go-crud/internal/rules"
 	RulesProduct "github.com/Nithin0620/dynamodb-go-crud/internal/rules/product"
 	HttpStatus "github.com/Nithin0620/dynamodb-go-crud/utils/http"
 	"github.com/Nithin0620/dynamodb-go-crud/utils/logger"
+	"github.com/go-chi/chi"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
-	handlers.Interface
-	Controller product.Interface
+	Controller prodCtrl.Interface
 	Rules      Rules.Interface
 }
 
-func NewHandler(repository adapter.Interface) handlers.Interface {
+func NewHandler(repository adapter.Interface) *Handler {
 	return &Handler{
-		Controller: product.NewController(repository),
+		Controller: prodCtrl.NewController(repository),
 		Rules:      RulesProduct.NewRules(),
 	}
 }
 
+// GET /products or GET /products/{ID} (Public)
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if chi.URLParam(r, "ID") != "" {
 		h.getOne(w, r)
@@ -42,19 +42,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getOne(w http.ResponseWriter, r *http.Request) {
 	ID, err := uuid.Parse(chi.URLParam(r, "ID"))
 	if err != nil {
-		logger.ERROR("Error while parsing the ID: ", err)
-		HttpStatus.StatusBadRequest(w, r, errors.New("ID is not a valid uuid"))
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid product UUID"))
 		return
 	}
 
 	response, err := h.Controller.ListOne(ID)
 	if err != nil {
-		logger.ERROR("Error while getting the product: ", err)
-		if errors.Is(err, product.ErrNotFound) {
-			HttpStatus.StatusNotFound(w, r, err)
-			return
-		}
-		HttpStatus.StatusInternalServerError(w, r, err)
+		HttpStatus.StatusNotFound(w, r, err)
 		return
 	}
 
@@ -64,7 +58,7 @@ func (h *Handler) getOne(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 	response, err := h.Controller.ListAll()
 	if err != nil {
-		logger.ERROR("Error while getting the products: ", err)
+		logger.ERROR("Error while getting products: ", err)
 		HttpStatus.StatusInternalServerError(w, r, err)
 		return
 	}
@@ -72,46 +66,83 @@ func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 	HttpStatus.StatusOK(w, r, response)
 }
 
-func (h *Handler) Post(w http.ResponseWriter, r *http.Request) {
-	productBody, err := h.getBodyAndValidate(r, uuid.Nil)
+// GET /admin/products (Store Owner Only - views their own inventory)
+func (h *Handler) GetMyProducts(w http.ResponseWriter, r *http.Request) {
+	ownerIDStr := middlewares.GetAuthUserID(r)
+	ownerID, err := uuid.Parse(ownerIDStr)
 	if err != nil {
-		logger.ERROR("Error while getting the body and validating: ", err)
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid owner token"))
+		return
+	}
+
+	products, err := h.Controller.ListByOwner(ownerID)
+	if err != nil {
+		HttpStatus.StatusInternalServerError(w, r, err)
+		return
+	}
+	HttpStatus.StatusOK(w, r, products)
+}
+
+// POST /admin/products (Store Owner Only)
+func (h *Handler) Post(w http.ResponseWriter, r *http.Request) {
+	ownerIDStr := middlewares.GetAuthUserID(r)
+	ownerID, err := uuid.Parse(ownerIDStr)
+	if err != nil {
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid owner token"))
+		return
+	}
+
+	var p EntityProduct.Product
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid json payload"))
+		return
+	}
+
+	p.ID = uuid.New()
+	p.OwnerID = ownerID
+	p.CreatedAt = time.Now()
+	p.UpdatedAt = time.Now()
+
+	if err := h.Rules.Validate(&p); err != nil {
 		HttpStatus.StatusBadRequest(w, r, err)
 		return
 	}
 
-	ID, err := h.Controller.Create(productBody)
+	id, err := h.Controller.Create(&p)
 	if err != nil {
-		logger.ERROR("Error while creating the product: ", err)
+		logger.ERROR("Error creating product: ", err)
 		HttpStatus.StatusInternalServerError(w, r, err)
 		return
 	}
 
-	HttpStatus.StatusOK(w, r, map[string]interface{}{"ID": ID.String()})
+	HttpStatus.StatusOK(w, r, map[string]interface{}{"id": id.String()})
 }
 
+// PUT /admin/products/{ID} (Store Owner Only)
 func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
+	ownerIDStr := middlewares.GetAuthUserID(r)
+	ownerID, err := uuid.Parse(ownerIDStr)
+	if err != nil {
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid owner token"))
+		return
+	}
+
 	ID, err := uuid.Parse(chi.URLParam(r, "ID"))
 	if err != nil {
-		logger.ERROR("Error while parsing the ID: ", err)
-		HttpStatus.StatusBadRequest(w, r, errors.New("ID is not a valid uuid"))
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid product UUID"))
 		return
 	}
 
-	productBody, err := h.getBodyAndValidate(r, ID)
-	if err != nil {
-		logger.ERROR("Error while getting the body and validating: ", err)
-		HttpStatus.StatusBadRequest(w, r, err)
+	var p EntityProduct.Product
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid json payload"))
 		return
 	}
+	p.ID = ID
+	p.OwnerID = ownerID
 
-	err = h.Controller.Update(ID, productBody)
+	err = h.Controller.Update(ID, &p, ownerID)
 	if err != nil {
-		logger.ERROR("Error while updating the product: ", err)
-		if errors.Is(err, product.ErrNotFound) {
-			HttpStatus.StatusNotFound(w, r, err)
-			return
-		}
 		HttpStatus.StatusInternalServerError(w, r, err)
 		return
 	}
@@ -119,22 +150,24 @@ func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 	HttpStatus.StatusNoContent(w, r)
 }
 
+// DELETE /admin/products/{ID} (Store Owner Only)
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	ID, err := uuid.Parse(chi.URLParam(r, "ID"))
+	ownerIDStr := middlewares.GetAuthUserID(r)
+	ownerID, err := uuid.Parse(ownerIDStr)
 	if err != nil {
-		logger.ERROR("Error while parsing the ID: ", err)
-		HttpStatus.StatusBadRequest(w, r, errors.New("ID is not a valid uuid"))
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid owner token"))
 		return
 	}
 
-	err = h.Controller.Remove(ID)
+	ID, err := uuid.Parse(chi.URLParam(r, "ID"))
 	if err != nil {
-		logger.ERROR("Error while deleting the product: ", err)
-		if errors.Is(err, product.ErrNotFound) {
-			HttpStatus.StatusNotFound(w, r, err)
-			return
-		}
-		HttpStatus.StatusInternalServerError(w, r, errors.New("Error while deleting the product"))
+		HttpStatus.StatusBadRequest(w, r, errors.New("invalid product UUID"))
+		return
+	}
+
+	err = h.Controller.Remove(ID, ownerID)
+	if err != nil {
+		HttpStatus.StatusInternalServerError(w, r, err)
 		return
 	}
 
@@ -143,30 +176,4 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Options(w http.ResponseWriter, r *http.Request) {
 	HttpStatus.StatusNoContent(w, r)
-}
-
-func (h *Handler) getBodyAndValidate(r *http.Request, ID uuid.UUID) (*EntityProduct.Product, error) {
-	productBody := &EntityProduct.Product{}
-	body, err := h.Rules.ConvertIoReaderToStruct(r.Body, productBody)
-	if err != nil {
-		return &EntityProduct.Product{}, errors.New("Body is required and must be a valid JSON")
-	}
-
-	productParsed, err := EntityProduct.InterfaceToModel(body)
-	if err != nil {
-		return &EntityProduct.Product{}, errors.New("Error while parsing the product")
-	}
-
-	setDefaultValues(productParsed, ID)
-	return productParsed, h.Rules.Validate(productParsed)
-}
-
-func setDefaultValues(product *EntityProduct.Product, ID uuid.UUID) {
-	product.UpdatedAt = time.Now()
-	if ID == uuid.Nil {
-		product.ID = uuid.New()
-		product.CreatedAt = time.Now()
-	} else {
-		product.ID = ID
-	}
 }

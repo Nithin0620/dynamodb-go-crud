@@ -7,60 +7,61 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nithin0620/dynamodb-go-crud/internal/entities"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/entities/product"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	Validation "github.com/go-ozzo/ozzo-validation/v4"
+	"github.com/go-ozzo/ozzo-validation/v4/is"
 	"github.com/google/uuid"
-
-	"github.com/Nithin0620/dynamodb-go-crud/internal/entities"
-	productEntity "github.com/Nithin0620/dynamodb-go-crud/internal/entities/product"
 )
 
-type Rules struct {
-}
+type Rules struct{}
 
 func NewRules() *Rules {
 	return &Rules{}
 }
 
-func (r *Rules) ConvertIoReaderToStruct(data io.Reader, model interface{}) (body interface{}, err error) {
+func (r *Rules) ConvertIoReaderToStruct(data io.Reader, model interface{}) (interface{}, error) {
 	if data == nil {
 		return nil, errors.New("data is nil")
 	}
-
 	return model, json.NewDecoder(data).Decode(model)
 }
 
-func (r *Rules) Migrate(connection *dynamodb.DynamoDB) (err error) {
+func (r *Rules) Migrate(connection *dynamodb.DynamoDB) error {
 	return r.CreateTable(connection)
 }
 
 func (r *Rules) GetMock() interface{} {
-	return productEntity.Product{
+	return product.Product{
 		Base: entities.Base{
 			ID:        uuid.New(),
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		},
-		Name: uuid.New().String(),
+		Name:  uuid.New().String(),
+		Price: 10.0,
+		Stock: 5,
 	}
 }
 
-func (r *Rules) Validate(model interface{}) (err error) {
-	productModel, err := productEntity.InterfaceToModel(model)
+func (r *Rules) Validate(model interface{}) error {
+	productModel, err := product.InterfaceToModel(model)
 	if err != nil {
 		return err
 	}
 
 	return Validation.ValidateStruct(productModel,
-		Validation.Field(&productModel.ID, Validation.Required),
-		Validation.Field(&productModel.Name, Validation.Required, Validation.Length(3, 50)),
+		Validation.Field(&productModel.ID, Validation.Required, is.UUIDv4),
+		Validation.Field(&productModel.Name, Validation.Required, Validation.Length(2, 100)),
+		Validation.Field(&productModel.Price, Validation.Min(0.0)),
+		Validation.Field(&productModel.Stock, Validation.Min(0)),
 	)
 }
 
-func (r *Rules) CreateTable(connection *dynamodb.DynamoDB) (err error) {
-	table := &productEntity.Product{}
-
+func (r *Rules) CreateTable(connection *dynamodb.DynamoDB) error {
+	table := &product.Product{}
 	input := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{
@@ -78,22 +79,15 @@ func (r *Rules) CreateTable(connection *dynamodb.DynamoDB) (err error) {
 			ReadCapacityUnits:  aws.Int64(10),
 			WriteCapacityUnits: aws.Int64(10),
 		},
-		// BillingMode: aws.String("PAY_PER_REQUEST"),
 		TableName: aws.String(table.TableName()),
 	}
 
 	response, err := connection.CreateTable(input)
-
-	if err != nil && strings.Contains(err.Error(), "Table already exists") {
+	if err != nil && (strings.Contains(err.Error(), "ResourceInUseException") || strings.Contains(err.Error(), "Table already exists")) {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
 	if response != nil && strings.Contains(response.GoString(), "TableStatus: \"CREATING\"") {
-		time.Sleep(5 * time.Second)
-		return r.CreateTable(connection)
+		time.Sleep(3 * time.Second)
 	}
-
-	return nil
+	return err
 }
