@@ -1,0 +1,97 @@
+I have set up the complete automated deployment pipeline for you with a production Dockerfile, docker-compose.yml, and a
+  Jenkinsfile.
+  ──────
+  ### 1. Where to Add Credentials in Jenkins
+  In your Jenkins dashboard:
+  Go to Manage Jenkins → Credentials → System → Global credentials (unrestricted) → + Add Credentials:
+
+   Credential Type               │ ID (Must match exactly) │ Description & Value
+  ───────────────────────────────┼─────────────────────────┼───────────────────────────────────────────────────────────────────
+   SSH Username with private key │ gcp-vm-ssh-key          │ Username: leonive_es_gmail_comPrivate Key: Paste your private key
+                                 │                         │ (~/.ssh/google_compute_engine or your GCP SSH private key)
+   Secret text                   │ aws-access-key-id       │ Paste your AWS Access Key ID (e.g. AKIAIOSFODNN7EXAMPLE)
+   Secret text                   │ aws-secret-access-key   │ Paste your AWS Secret Access Key
+
+  (Jenkins safely injects these credentials at runtime—they are never committed into your git repository).
+  ──────
+  ### 2. How the Pipeline Works (Jenkinsfile)
+
+  1. Stage 1 (Checkout Code): Pulls the repository from GitHub.
+  2. Stage 2 (Deploy to GCP VM via SSH):
+      • Uses the gcp-vm-ssh-key to securely SSH into 34.135.165.205.
+      • Syncs code to the VM (/home/leonive_es_gmail_com/saltwake-ecommerce).
+      • Writes the injected AWS credentials into a local .env file on the VM.
+      • Builds the optimized multi-stage Docker container (Dockerfile).
+      • Starts the container with --restart always -p 8080:8080.
+  3. Stage 3 (Health Check): Runs an automated curl http://34.135.165.205:8080/health check to confirm the backend is up.
+  ──────
+  ### 3. Production Multi-Stage Dockerfile
+
+  • Stage 1: Compiles the React + Vite frontend (npm run build).
+  • Stage 2: Compiles the Go backend binary (CGO_ENABLED=0 go build).
+  • Stage 3: Minimal Alpine runner image (~15MB) copying both the Go server and the built React frontend static assets,
+  exposing port 8080.
+  ──────
+  ### 4. Running the Jenkins Job
+
+  1. In Jenkins, create a New Item → Pipeline.
+  2. Under Pipeline Definition, select Pipeline script from SCM → Git.
+  3. Enter your repository URL: https://github.com/Nithin0620/dynamodb-go-crud.git.
+  4. Click Build Now!
+
+────────────────────────────────────────────────────────────
+> ### 1. Where to Add Credentials in Jenkins
+    In your Jenkins dashboard:
+    Go to Manage Jenkins → Credentials → System → Global credentials (unrestricted) → + Add Credentials:
+  
+     Credential Type               │ ID (Must match exactly) │ Description & Value
+    ───────────────────────────────┼─────────────────────────┼───────────────────────────────────────────────────────────────────
+     SSH Username with private key │ gcp-vm-ssh-key          │ Username: leonive_es_gmail_comPrivate Key: Paste your private key
+                                   │                         │ (~/.ssh/google_compute_engine or your GCP SSH private key)
+     Secret text                   │ aws-access-key-id       │ Paste your AWS Access Key ID (e.g. AKIAIOSFODNN7EXAMPLE)
+     Secret text                   │ aws-secret-access-key   │ Paste your AWS Secret Access Key
+  
+  
+  
+  
+  i want it to use the loal docker based dynamoDB container then why this aws key ? isnt it all in one docker cimpose file with 3
+  containers backend DB and frontned
+
+● Edited 5 files (Dockerfile, Dockerfile, docker-compose.yml, +2) (ctrl+o to collapse)
+● Create(~/Projects/dynamodb-go-crud/frontend/Dockerfile)
+  ⎿  Wrote 7 lines
+● Edit(~/Projects/dynamodb-go-crud/Dockerfile)
+  ⎿  Wrote 2 lines
+● Edit(~/Projects/dynamodb-go-crud/docker-compose.yml)
+  ⎿  Wrote 45 lines
+● Edit(~/Projects/dynamodb-go-crud/frontend/vite.config.js)
+  ⎿  +6 / -5 lines
+        4    export default defineConfig({
+        5      plugins: [react()],
+        6      server: {
+        7 +      host: true,
+        8        port: 5173,
+        9        proxy: {
+        9 -        '/auth': 'http://localhost:8080',
+       10 -        '/products': 'http://localhost:8080',
+       11 -        '/orders': 'http://localhost:8080',
+       12 -        '/admin': 'http://localhost:8080',
+       13 -        '/health': 'http://localhost:8080',
+       10 +        '/auth': 'http://backend:8080',
+       11 +        '/products': 'http://backend:8080',
+       12 +        '/orders': 'http://backend:8080',
+       13 +        '/admin': 'http://backend:8080',
+       14 +        '/health': 'http://backend:8080',
+       15        }
+       16      }
+       17    })
+● Edit(~/Projects/dynamodb-go-crud/Jenkinsfile)
+  ⎿  Wrote 34 lines (ctrl+o to collapse)
+
+⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 139h54m31s.
+Error ID: 773883ea-8a88-4aa2-b6d7-2da944b2869d-416
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                      auto · Gemini 3.8 Flash · low

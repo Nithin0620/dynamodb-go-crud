@@ -30,8 +30,13 @@ pipeline {
                         # 1. Create app directory on the VM
                         ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "mkdir -p ${APP_DIR}"
 
-                        # 2. Sync codebase to the VM (excluding unnecessary local node_modules)
-                        rsync -avz --delete --exclude '.git' --exclude 'frontend/node_modules' -e "ssh ${SSH_OPTS}" ./ ${GCP_VM_USER}@${GCP_VM_IP}:${APP_DIR}/
+                        # 2. Sync codebase using rsync if available, otherwise fallback to tar over ssh
+                        if command -v rsync >/dev/null 2>&1; then
+                            rsync -avz --delete --exclude '.git' --exclude 'frontend/node_modules' -e "ssh ${SSH_OPTS}" ./ ${GCP_VM_USER}@${GCP_VM_IP}:${APP_DIR}/
+                        else
+                            echo "rsync not found on Jenkins host; streaming tar archive over ssh..."
+                            tar --exclude='./.git' --exclude='./frontend/node_modules' -czf - . | ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "tar -xzf - -C ${APP_DIR}"
+                        fi
 
                         # 3. Start the 3-container Docker Compose stack on the VM
                         ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "
