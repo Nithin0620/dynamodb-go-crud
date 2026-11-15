@@ -1,19 +1,19 @@
 package main
 
-import(
+import (
 	"fmt"
 	"log"
 	"net/http"
-	
-	"github.com/Nithin0620/dynamoDB-CRUD/internal/repository/adapter"
-	"github.com/Nithin0620/dynamoDB-CRUD/internal/repository/instance"
-	"github.com/Nithin0620/dynamoDB-CRUD/internal/routes"
-	"github.com/Nithin0620/dynamoDB-CRUD/internal/rules"
-	"github.com/Nithin0620/dynamoDB-CRUD/internal/rules/product"
-	"github.com/Nithin0620/dynamoDB-CRUD/utils/logger"
-	
+
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-	
+
+	"github.com/Nithin0620/dynamodb-go-crud/config"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/repository/adapter"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/repository/instance"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/routes"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/rules"
+	RulesProduct "github.com/Nithin0620/dynamodb-go-crud/internal/rules/product"
+	"github.com/Nithin0620/dynamodb-go-crud/utils/logger"
 )
 
 func main() {
@@ -23,55 +23,51 @@ func main() {
 
 	logger.INFO("Waiting for the service to start on port: ", configs.Port)
 
-	errors := Migrate(connection)
-	if len(errors) > 0{
-		for _,err := range errors{
+	migrationErrors := Migrate(connection)
+	if len(migrationErrors) > 0 {
+		for _, err := range migrationErrors {
 			logger.PANIC("Error while migrating the database: ", err)
 		}
 	}
 
-	logger.PANIC("",checkTables(connection))
+	if err := checkTables(connection); err != nil {
+		logger.PANIC("Error while checking tables: ", err)
+	}
 
-	port := fmt.Sprintf(":%d", configs.Port) 
+	port := fmt.Sprintf(":%d", configs.Port)
 	router := routes.NewRouter().SetRouters(repository)
 	logger.INFO("Server is running on port: ", port)
 
-	server := http.ListenAndServe(port,router)
-
+	server := http.ListenAndServe(port, router)
 	log.Fatal(server)
-}	
-
-
+}
 
 func Migrate(connection *dynamodb.DynamoDB) []error {
- 	var errors []error
-	callMigrateAndAppendError(&errors, connection, &RulesProduct.Rules{})	
+	var errors []error
+	callMigrateAndAppendError(&errors, connection, &RulesProduct.Rules{})
 	return errors
 }
 
-func callMigrateAndAppendError(errors *[]error, connection *dynamodb.DynamoDB,rules rules.Interface) {
-	// Implementation for calling migration and appending errors
+func callMigrateAndAppendError(errors *[]error, connection *dynamodb.DynamoDB, rules rules.Interface) {
 	err := rules.Migrate(connection)
 	if err != nil {
 		*errors = append(*errors, err)
 	}
-
 }
 
 func checkTables(connection *dynamodb.DynamoDB) error {
-	response,err := connection.ListTables(&dynamodb.ListTables(&dynamodb.ListtablesInput{}))
+	response, err := connection.ListTables(&dynamodb.ListTablesInput{})
 	if err != nil {
-		logger.PANIC("Error while checking tables: ", err)
 		return fmt.Errorf("Error while checking tables: %v", err)
 	}
 
 	if response == nil || len(response.TableNames) == 0 {
-		logger.PANIC("No tables found in the database",nil)
 		return fmt.Errorf("No tables found in the database")
 	}
 
-	for _,tableName := range response.TableNames {
+	for _, tableName := range response.TableNames {
 		logger.INFO("Table found: ", *tableName)
 	}
-	return err
+
+	return nil
 }

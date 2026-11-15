@@ -1,22 +1,23 @@
 package routes
 
-import(
-	"github.com/go-chi/chi/"
-	"github.com/go-chi/chi/middleware"
-	// "github.com"
+import (
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
 	ServerConfig "github.com/Nithin0620/dynamodb-go-crud/config"
 	HealthHandler "github.com/Nithin0620/dynamodb-go-crud/internal/handlers/health"
 	ProductHandler "github.com/Nithin0620/dynamodb-go-crud/internal/handlers/product"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/repository/adapter"
 )
 
-type Router Struct {
+type Router struct {
 	config *Config
 	router *chi.Mux
 }
 
-func NewRouter() *Router{
+func NewRouter() *Router {
 	return &Router{
-		config: newConfig().setTimeout(serviceConfig.GetConfig().Timeout),
+		config: NewConfig().SetTimeout(ServerConfig.GetConfig().Timeout),
 		router: chi.NewRouter(),
 	}
 }
@@ -38,58 +39,56 @@ func (r *Router) setConfigsRouters() {
 }
 
 func (r *Router) RouterHealth(repository adapter.Interface) {
-	handler := HealthHandler.NewHealthHandler(repository)
+	handler := HealthHandler.NewHandler(repository)
 
-	r.router.Route("/health",func(route chi.Router){
-		route.Get("/",handler.Get)
-		route.Put("/",handler.Put)
-		route.Post("/",handler.Post)
-		route.Delete("/",handler.Delete)
-		route.Options("/",handler.Options)
+	r.router.Route("/health", func(route chi.Router) {
+		route.Get("/", handler.Get)
+		route.Put("/", handler.Put)
+		route.Post("/", handler.Post)
+		route.Delete("/", handler.Delete)
+		route.Options("/", handler.Options)
 	})
 }
 
 func (r *Router) RouterProduct(repository adapter.Interface) {
-	handler := ProductHandler.NewProductHandler(repository)
+	handler := ProductHandler.NewHandler(repository)
 
-	r.router.Route("/product",func(route chi.Router){
-		route.Get("/",handler.Get)
-		route.Put("/{ID}",handler.Put)
-		route.Post("/",handler.Post)
-		route.Delete("/{ID}",handler.Delete)
-		route.Options("/",handler.Options)
+	r.router.Route("/product", func(route chi.Router) {
+		route.Get("/", handler.Get)
+		route.Get("/{ID}", handler.Get)
+		route.Put("/{ID}", handler.Put)
+		route.Post("/", handler.Post)
+		route.Delete("/{ID}", handler.Delete)
+		route.Options("/", handler.Options)
 	})
 }
 
-func (r *Router) EnableLogger() *Router{ 
+func (r *Router) EnableLogger() *Router {
 	r.router.Use(middleware.Logger)
 	return r
 }
-func (r *Router) EnableTimeout() *Router{
+
+func (r *Router) EnableTimeout() *Router {
 	r.router.Use(middleware.Timeout(r.config.GetTimeout()))
 	return r
 }
 
-func (r *Router) EnableCORS() *Router{
-	r.router.Use(r.config.cors)
-
+func (r *Router) EnableCORS() *Router {
+	r.router.Use(r.config.Cors)
 	return r
 }
 
-func (r *Router) EnableRecover() *Router{
+func (r *Router) EnableRecover() *Router {
 	r.router.Use(middleware.Recoverer)
-
 	return r
 }
 
-func (r *Router) EnableRequestID() *Router{
+func (r *Router) EnableRequestID() *Router {
 	r.router.Use(middleware.RequestID)
-
 	return r
 }
 
-func (r *Router) EnableRealIP() *Router{
+func (r *Router) EnableRealIP() *Router {
 	r.router.Use(middleware.RealIP)
-
 	return r
 }

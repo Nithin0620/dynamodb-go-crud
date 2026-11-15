@@ -1,12 +1,13 @@
 package health
 
-import(
+import (
 	"errors"
 	"net/http"
-	"github.com/Nithin0620/dynamoDB-GO-CRUD/internal/handlers"
-	"github.com/Nithin0620/dynamoDB-GO-CRUD/internal/adapter"
-)
 
+	"github.com/Nithin0620/dynamodb-go-crud/internal/handlers"
+	"github.com/Nithin0620/dynamodb-go-crud/internal/repository/adapter"
+	HttpStatus "github.com/Nithin0620/dynamodb-go-crud/utils/http"
+)
 
 type Handler struct {
 	handlers.Interface
@@ -21,25 +22,24 @@ func NewHandler(repository adapter.Interface) *Handler {
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if !h.Repository.Health() {
-		HttpStatus.StatusInternalServerError(w,r,errors.New("Relational database is not alive"))
-		
-		return	
+		HttpStatus.StatusInternalServerError(w, r, errors.New("DynamoDB is not alive"))
+		return
 	}
-	HttpStatus.StatusOK(w,r,"Relational database is alive")
+	HttpStatus.StatusOK(w, r, "DynamoDB is alive")
 }
-   
+
 func (h *Handler) Post(w http.ResponseWriter, r *http.Request) {
-	HttpStatus.StatusMethodNotAllowed(w,r,"Method not allowed")
+	HttpStatus.StatusMethodNotAllowed(w, r)
 }
 
 func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
-	HttpStatus.StatusMethodNotAllowed(w,r,"Method not allowed")
+	HttpStatus.StatusMethodNotAllowed(w, r)
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	HttpStatus.StatusMethodNotAllowed(w,r,"Method not allowed")
+	HttpStatus.StatusMethodNotAllowed(w, r)
 }
 
 func (h *Handler) Options(w http.ResponseWriter, r *http.Request) {
-	HttpStatus.StatusNoContent(w,r)
+	HttpStatus.StatusNoContent(w, r)
 }

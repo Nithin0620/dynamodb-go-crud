@@ -6,27 +6,26 @@ import (
 	"io"
 	"strings"
 	"time"
-	
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	Validation "github.com/go-ozzo/ozzo-validation/v4"
-	"github.com/go-ozzo/ozzo-validation/v4/is"
 	"github.com/google/uuid"
-	"github.com/Nithin0620/dynamodb-go-crud/internal/entities/product"
+
+	"github.com/Nithin0620/dynamodb-go-crud/internal/entities"
+	productEntity "github.com/Nithin0620/dynamodb-go-crud/internal/entities/product"
 )
 
 type Rules struct {
-
 }
-
 
 func NewRules() *Rules {
 	return &Rules{}
 }
 
-func (r *Rules) convertIoReaderToStruct(data io.Reader, model interface{}) (body interface{},err error) {
+func (r *Rules) ConvertIoReaderToStruct(data io.Reader, model interface{}) (body interface{}, err error) {
 	if data == nil {
-		return nil,errors.New("data is nil")
+		return nil, errors.New("data is nil")
 	}
 
 	return model, json.NewDecoder(data).Decode(model)
@@ -37,9 +36,9 @@ func (r *Rules) Migrate(connection *dynamodb.DynamoDB) (err error) {
 }
 
 func (r *Rules) GetMock() interface{} {
-	return product.Product{
-		Base : entities.Base{
-			ID: uuid.New(),
+	return productEntity.Product{
+		Base: entities.Base{
+			ID:        uuid.New(),
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		},
@@ -48,20 +47,19 @@ func (r *Rules) GetMock() interface{} {
 }
 
 func (r *Rules) Validate(model interface{}) (err error) {
-	productModel,err := product.InterfaceToModel(model)
-
+	productModel, err := productEntity.InterfaceToModel(model)
 	if err != nil {
 		return err
 	}
 
 	return Validation.ValidateStruct(productModel,
-		Validation.Field(&productModel.ID,Validation.Required,is.UUIDv4),
-		Validation.Field(&productModel.Name,Validation.Required, Validation.Length(3, 50)),
+		Validation.Field(&productModel.ID, Validation.Required),
+		Validation.Field(&productModel.Name, Validation.Required, Validation.Length(3, 50)),
 	)
 }
 
 func (r *Rules) CreateTable(connection *dynamodb.DynamoDB) (err error) {
-	table := &product.Product{}
+	table := &productEntity.Product{}
 
 	input := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
@@ -70,7 +68,7 @@ func (r *Rules) CreateTable(connection *dynamodb.DynamoDB) (err error) {
 				AttributeType: aws.String("S"),
 			},
 		},
-		keySchema: []*dynamodb.KeySchemaElement{
+		KeySchema: []*dynamodb.KeySchemaElement{
 			{
 				AttributeName: aws.String("_id"),
 				KeyType:       aws.String("HASH"),
@@ -81,20 +79,21 @@ func (r *Rules) CreateTable(connection *dynamodb.DynamoDB) (err error) {
 			WriteCapacityUnits: aws.Int64(10),
 		},
 		// BillingMode: aws.String("PAY_PER_REQUEST"),
-		TableName:   aws.String(table.TableName()),
+		TableName: aws.String(table.TableName()),
 	}
 
-	response,err := connection.CreateTable(input)
+	response, err := connection.CreateTable(input)
 
 	if err != nil && strings.Contains(err.Error(), "Table already exists") {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
 	if response != nil && strings.Contains(response.GoString(), "TableStatus: \"CREATING\"") {
 		time.Sleep(5 * time.Second)
-		err = r.CreateTable(connection)
-		if err != nil {
-			return err
-		}
+		return r.CreateTable(connection)
 	}
-	return err
+
+	return nil
 }

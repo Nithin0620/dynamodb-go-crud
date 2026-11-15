@@ -1,31 +1,35 @@
-package config 
+package config
 
 import (
-	"github.com/Nithin0620/dynamodb-go-crud/utils/env"
 	"strconv"
+
+	"github.com/Nithin0620/dynamodb-go-crud/utils/env"
 )
 
 type config struct {
-	Port int
-	Timeout int
-	Dialect string
+	Port        int
+	Timeout     int
+	Dialect     string
 	DatabaseURI string
 }
 
 func GetConfig() *config {
-	return Config{
-		Port:	parseEnvToInt("PORT","8080"),  
-		Timeout: parseEnvToInt("TIMEOUT","30"),
-		Dialect: env.GetEnv("DIALECT","sqlite3"),
-		DatabaseURI: env.GetEnv("DATABASE_URI",":memory:"),
+	return &config{
+		Port:        parseEnvToInt("PORT", "8080"),
+		Timeout:     parseEnvToInt("TIMEOUT", "30"),
+		Dialect:     env.GetEnv("DIALECT", "dynamodb"),
+		DatabaseURI: env.GetEnv("DATABASE_URI", ""),
 	}
 }
 
-func parseEnvToInt(envName string,defaultValue sting) int{
-	num,err := strconv.Atoi(env.GetEnv(envName,defaultValue))
-
+func parseEnvToInt(envName string, defaultValue string) int {
+	num, err := strconv.Atoi(env.GetEnv(envName, defaultValue))
 	if err != nil {
-		return 0
+		fallback, fallbackErr := strconv.Atoi(defaultValue)
+		if fallbackErr != nil {
+			return 0
+		}
+		return fallback
 	}
 
 	return num
