@@ -56,20 +56,34 @@ pipeline {
                                 sudo usermod -aG docker \$USER
                             fi
 
-                            # Remove containers left behind by older compose projects (fixed container_name collisions)
+                            # 1. Stop and remove existing compose project first
+                            echo 'Stopping existing compose services...'
+                            sudo docker compose down --remove-orphans -t 10 || true
+
+                            # 2. Force remove named containers if still around
                             sudo docker rm -f saltwake-backend saltwake-frontend dynamodb-local >/dev/null 2>&1 || true
 
-                            # Release app ports from stale containers/processes left by older deploys
-                            echo 'Releasing ports 8000, 8080, 5173...'
+                            # 3. Kill any rogue docker container bound to our ports (including other compose projects / standalone runs)
                             for port in 8000 8080 5173; do
-                                sudo docker ps -q --filter publish=\$port | xargs -r sudo docker rm -f
-                                if command -v fuser >/dev/null 2>&1; then
-                                    sudo fuser -k -n tcp \$port >/dev/null 2>&1 || true
-                                fi
+                                sudo docker ps -q --filter publish=\$port | xargs -r sudo docker rm -f || true
                             done
 
+                            # 4. Kill any host-level or zombie processes bound to our ports
+                            echo 'Releasing ports 8000, 8080, 5173...'
+                            for port in 8000 8080 5173; do
+                                if command -v fuser >/dev/null 2>&1; then
+                                    sudo fuser -k -9 \${port}/tcp >/dev/null 2>&1 || true
+                                fi
+                                if command -v lsof >/dev/null 2>&1; then
+                                    sudo lsof -t -i:\$port | xargs -r sudo kill -9 >/dev/null 2>&1 || true
+                                fi
+                                if command -v ss >/dev/null 2>&1; then
+                                    sudo ss -lptn "sport = :\$port" || true
+                                fi
+                            done
+                            sleep 2
+
                             echo 'Launching DynamoDB Local, Go Backend, and React Frontend containers...'
-                            sudo docker compose down --remove-orphans || true
                             sudo docker compose up -d --build --wait --wait-timeout 300
 
                             echo 'Verifying all 3 containers are running...'
