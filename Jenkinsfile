@@ -44,78 +44,8 @@ pipeline {
                             tar --exclude='./.git' --exclude='./frontend/node_modules' -czf - . | ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "tar -xzf - -C ${APP_DIR}"
                         fi
 
-                        # 3. Start the 3-container Docker Compose stack on the VM
-                        ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "
-                            set -e
-                            cd ${APP_DIR}
-
-                            # Ensure Docker & Docker Compose are installed
-                            if ! command -v docker >/dev/null 2>&1; then
-                                echo 'Installing docker...'
-                                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                                sudo usermod -aG docker \$USER
-                            fi
-
-                            # Ensure Docker daemon is running
-                            sudo systemctl start docker || true
-
-                            # Ensure Docker daemon has Google DNS configured to avoid Docker Hub TLS handshake timeouts
-                            if [ ! -f /etc/docker/daemon.json ] || ! grep -q "8.8.8.8" /etc/docker/daemon.json 2>/dev/null; then
-                                echo "Configuring reliable DNS for Docker daemon..."
-                                sudo mkdir -p /etc/docker
-                                sudo bash -c 'cat <<EOF > /etc/docker/daemon.json
-{
-  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
-}
-EOF'
-                                sudo systemctl restart docker || true
-                                sleep 3
-                            fi
-
-                            # 1. Stop and remove existing compose project
-                            echo 'Stopping existing compose services...'
-                            sudo docker compose down --remove-orphans -t 10 || true
-
-                            # 2. Force remove named containers if still around
-                            sudo docker rm -f saltwake-backend saltwake-frontend dynamodb-local >/dev/null 2>&1 || true
-
-                            # 3. Kill any rogue docker container bound to our app ports (8000, 8081, 5173)
-                            for port in 8000 8081 5173; do
-                                sudo docker ps -q --filter publish=\$port | xargs -r sudo docker rm -f || true
-                            done
-
-                            # 4. Clean lingering non-docker processes on our app ports (NEVER touch 8080 where Jenkins runs)
-                            echo 'Releasing app ports 8000, 8081, 5173...'
-                            for port in 8000 8081 5173; do
-                                if command -v fuser >/dev/null 2>&1; then
-                                    sudo fuser -k -9 \${port}/tcp >/dev/null 2>&1 || true
-                                fi
-                                if command -v lsof >/dev/null 2>&1; then
-                                    sudo lsof -t -i:\$port | xargs -r sudo kill -9 >/dev/null 2>&1 || true
-                                fi
-                            done
-                            sleep 2
-
-                            # 5. Pre-pull base images to speed up build and tolerate network blips
-                            echo "Ensuring required base images are cached..."
-                            for img in node:20-alpine golang:1.27-alpine alpine:3.19 amazon/dynamodb-local:latest; do
-                                sudo docker pull "\$img" || true
-                            done
-
-                            echo 'Launching DynamoDB Local, Go Backend, and React Frontend containers...'
-                            sudo docker compose up -d --build --wait --wait-timeout 300
-
-                            echo 'Verifying all 3 containers are running...'
-                            sudo docker compose ps
-                            sudo docker compose ps --status running --services | grep -qx backend
-                            sudo docker compose ps --status running --services | grep -qx frontend
-                            sudo docker compose ps --status running --services | grep -qx dynamodb-local
-
-                            echo 'All 3 containers successfully launched!'
-
-                            # Keep the VM from filling up with dangling images over repeated deploys
-                            sudo docker image prune -f >/dev/null || true
-                        "
+                        # 3. Execute dedicated deployment script on the VM
+                        ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "bash ${APP_DIR}/deploy/deploy.sh ${APP_DIR}"
                     '''
                 }
             }
