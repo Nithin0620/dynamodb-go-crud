@@ -56,6 +56,9 @@ pipeline {
                                 sudo usermod -aG docker \$USER
                             fi
 
+                            # Ensure Docker daemon is running
+                            sudo systemctl start docker || true
+
                             # Ensure Docker daemon has Google DNS configured to avoid Docker Hub TLS handshake timeouts
                             if [ ! -f /etc/docker/daemon.json ] || ! grep -q "8.8.8.8" /etc/docker/daemon.json 2>/dev/null; then
                                 echo "Configuring reliable DNS for Docker daemon..."
@@ -69,42 +72,35 @@ EOF'
                                 sleep 3
                             fi
 
-                            # Pre-pull base images with retries before build to handle transient network hiccups
-                            echo "Pre-fetching required Docker base images..."
-                            for img in node:20-alpine golang:1.27-alpine alpine:3.19 amazon/dynamodb-local:latest; do
-                                for attempt in 1 2 3; do
-                                    if sudo docker pull "\$img"; then
-                                        break
-                                    fi
-                                    echo "Retrying pull for \$img in 3s..."
-                                    sleep 3
-                                done
-                            done
+                            # 1. Stop and remove existing compose project
                             echo 'Stopping existing compose services...'
                             sudo docker compose down --remove-orphans -t 10 || true
 
                             # 2. Force remove named containers if still around
                             sudo docker rm -f saltwake-backend saltwake-frontend dynamodb-local >/dev/null 2>&1 || true
 
-                            # 3. Kill any rogue docker container bound to our ports (including other compose projects / standalone runs)
-                            for port in 8000 8080 5173; do
+                            # 3. Kill any rogue docker container bound to our app ports (8000, 8081, 5173)
+                            for port in 8000 8081 5173; do
                                 sudo docker ps -q --filter publish=\$port | xargs -r sudo docker rm -f || true
                             done
 
-                            # 4. Kill any host-level or zombie processes bound to our ports
-                            echo 'Releasing ports 8000, 8080, 5173...'
-                            for port in 8000 8080 5173; do
+                            # 4. Clean lingering non-docker processes on our app ports (NEVER touch 8080 where Jenkins runs)
+                            echo 'Releasing app ports 8000, 8081, 5173...'
+                            for port in 8000 8081 5173; do
                                 if command -v fuser >/dev/null 2>&1; then
                                     sudo fuser -k -9 \${port}/tcp >/dev/null 2>&1 || true
                                 fi
                                 if command -v lsof >/dev/null 2>&1; then
                                     sudo lsof -t -i:\$port | xargs -r sudo kill -9 >/dev/null 2>&1 || true
                                 fi
-                                if command -v ss >/dev/null 2>&1; then
-                                    sudo ss -lptn "sport = :\$port" || true
-                                fi
                             done
                             sleep 2
+
+                            # 5. Pre-pull base images to speed up build and tolerate network blips
+                            echo "Ensuring required base images are cached..."
+                            for img in node:20-alpine golang:1.27-alpine alpine:3.19 amazon/dynamodb-local:latest; do
+                                sudo docker pull "\$img" || true
+                            done
 
                             echo 'Launching DynamoDB Local, Go Backend, and React Frontend containers...'
                             sudo docker compose up -d --build --wait --wait-timeout 300
@@ -143,7 +139,7 @@ EOF'
                         echo "\$url failed health check after 60s"
                         return 1
                     }
-                    check_url http://${GCP_VM_IP}:8080/health/
+                    check_url http://${GCP_VM_IP}:8081/health/
                     check_url http://${GCP_VM_IP}:5173/
                 """
             }
@@ -155,7 +151,7 @@ EOF'
             echo "=========================================================="
             echo "DEPLOYMENT SUCCEEDED!"
             echo "Frontend UI:  http://${GCP_VM_IP}:5173"
-            echo "Backend API:  http://${GCP_VM_IP}:8080"
+            echo "Backend API:  http://${GCP_VM_IP}:8081"
             echo "DynamoDB:     http://${GCP_VM_IP}:8000"
             echo "=========================================================="
         }
