@@ -1,6 +1,11 @@
 pipeline {
     agent any
 
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
     environment {
         // GCP VM Connection Details
         GCP_VM_IP   = '34.135.165.205'
@@ -45,15 +50,27 @@ pipeline {
                             cd ${APP_DIR}
 
                             # Ensure Docker & Docker Compose are installed
-                            if ! command -v docker &> /dev/null; then
+                            if ! command -v docker >/dev/null 2>&1; then
                                 echo 'Installing docker...'
                                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
                                 sudo usermod -aG docker \$USER
                             fi
 
+                            # Remove containers left behind by older compose projects (fixed container_name collisions)
+                            sudo docker rm -f saltwake-backend saltwake-frontend dynamodb-local >/dev/null 2>&1 || true
+
+                            # Release app ports from stale containers/processes left by older deploys
+                            echo 'Releasing ports 8000, 8080, 5173...'
+                            for port in 8000 8080 5173; do
+                                sudo docker ps -q --filter publish=\$port | xargs -r sudo docker rm -f
+                                if command -v fuser >/dev/null 2>&1; then
+                                    sudo fuser -k -n tcp \$port >/dev/null 2>&1 || true
+                                fi
+                            done
+
                             echo 'Launching DynamoDB Local, Go Backend, and React Frontend containers...'
                             sudo docker compose down --remove-orphans || true
-                            sudo docker compose up -d --build --wait --wait-timeout 180
+                            sudo docker compose up -d --build --wait --wait-timeout 300
 
                             echo 'Verifying all 3 containers are running...'
                             sudo docker compose ps
@@ -62,6 +79,9 @@ pipeline {
                             sudo docker compose ps --status running --services | grep -qx dynamodb-local
 
                             echo 'All 3 containers successfully launched!'
+
+                            # Keep the VM from filling up with dangling images over repeated deploys
+                            sudo docker image prune -f >/dev/null || true
                         "
                     '''
                 }
@@ -70,20 +90,24 @@ pipeline {
 
         stage('Verify Deployment Health') {
             steps {
-                echo 'Checking backend & DynamoDB health...'
+                echo 'Checking frontend, backend & DynamoDB health...'
                 sh """
                     set -e
-                    for i in \$(seq 1 30); do
-                        if curl -fsSL http://${GCP_VM_IP}:8080/health/; then
-                            echo ""
-                            echo "Backend healthy after \${i} attempt(s)."
-                            exit 0
-                        fi
-                        echo "Backend not ready yet (\${i}/30), retrying in 2s..."
-                        sleep 2
-                    done
-                    echo 'Backend health check failed after 60s'
-                    exit 1
+                    check_url() {
+                        url=\$1
+                        for i in \$(seq 1 30); do
+                            if curl -fsS -o /dev/null "\$url"; then
+                                echo "\$url is healthy after \${i} attempt(s)."
+                                return 0
+                            fi
+                            echo "\$url not ready yet (\${i}/30), retrying in 2s..."
+                            sleep 2
+                        done
+                        echo "\$url failed health check after 60s"
+                        return 1
+                    }
+                    check_url http://${GCP_VM_IP}:8080/health/
+                    check_url http://${GCP_VM_IP}:5173/
                 """
             }
         }
