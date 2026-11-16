@@ -56,7 +56,30 @@ pipeline {
                                 sudo usermod -aG docker \$USER
                             fi
 
-                            # 1. Stop and remove existing compose project first
+                            # Ensure Docker daemon has Google DNS configured to avoid Docker Hub TLS handshake timeouts
+                            if [ ! -f /etc/docker/daemon.json ] || ! grep -q "8.8.8.8" /etc/docker/daemon.json 2>/dev/null; then
+                                echo "Configuring reliable DNS for Docker daemon..."
+                                sudo mkdir -p /etc/docker
+                                sudo bash -c 'cat <<EOF > /etc/docker/daemon.json
+{
+  "dns": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+}
+EOF'
+                                sudo systemctl restart docker || true
+                                sleep 3
+                            fi
+
+                            # Pre-pull base images with retries before build to handle transient network hiccups
+                            echo "Pre-fetching required Docker base images..."
+                            for img in node:20-alpine golang:1.27-alpine alpine:3.19 amazon/dynamodb-local:latest; do
+                                for attempt in 1 2 3; do
+                                    if sudo docker pull "\$img"; then
+                                        break
+                                    fi
+                                    echo "Retrying pull for \$img in 3s..."
+                                    sleep 3
+                                done
+                            done
                             echo 'Stopping existing compose services...'
                             sudo docker compose down --remove-orphans -t 10 || true
 
