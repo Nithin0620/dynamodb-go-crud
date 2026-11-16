@@ -25,6 +25,7 @@ pipeline {
                     echo "Connecting to GCP VM at ${GCP_VM_IP} and launching 3-container stack..."
 
                     sh '''
+                        set -e
                         SSH_OPTS="-o StrictHostKeyChecking=no -i ${SSH_KEY}"
 
                         # 1. Create app directory on the VM
@@ -40,6 +41,7 @@ pipeline {
 
                         # 3. Start the 3-container Docker Compose stack on the VM
                         ssh ${SSH_OPTS} ${GCP_VM_USER}@${GCP_VM_IP} "
+                            set -e
                             cd ${APP_DIR}
 
                             # Ensure Docker & Docker Compose are installed
@@ -51,10 +53,15 @@ pipeline {
 
                             echo 'Launching DynamoDB Local, Go Backend, and React Frontend containers...'
                             sudo docker compose down --remove-orphans || true
-                            sudo docker compose up -d --build
+                            sudo docker compose up -d --build --wait --wait-timeout 180
+
+                            echo 'Verifying all 3 containers are running...'
+                            sudo docker compose ps
+                            sudo docker compose ps --status running --services | grep -qx backend
+                            sudo docker compose ps --status running --services | grep -qx frontend
+                            sudo docker compose ps --status running --services | grep -qx dynamodb-local
 
                             echo 'All 3 containers successfully launched!'
-                            sudo docker compose ps
                         "
                     '''
                 }
@@ -65,8 +72,18 @@ pipeline {
             steps {
                 echo 'Checking backend & DynamoDB health...'
                 sh """
-                    sleep 10
-                    curl -sSf http://${GCP_VM_IP}:8080/health || (echo 'Backend health check failed' && exit 1)
+                    set -e
+                    for i in \$(seq 1 30); do
+                        if curl -fsSL http://${GCP_VM_IP}:8080/health/; then
+                            echo ""
+                            echo "Backend healthy after \${i} attempt(s)."
+                            exit 0
+                        fi
+                        echo "Backend not ready yet (\${i}/30), retrying in 2s..."
+                        sleep 2
+                    done
+                    echo 'Backend health check failed after 60s'
+                    exit 1
                 """
             }
         }
